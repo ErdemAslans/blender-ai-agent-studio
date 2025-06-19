@@ -1,0 +1,291 @@
+version: '3.8'
+
+services:
+  # Main application service
+  blender-ai-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        - VERSION=${VERSION:-latest}
+        - VCS_REF=${VCS_REF:-$(git rev-parse HEAD)}
+    image: blender-ai-studio:${VERSION:-latest}
+    container_name: blender-ai-studio
+    ports:
+      - "${WEB_PORT:-8501}:8501"
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # AI Configuration
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      
+      # Application Configuration
+      - OUTPUT_DIRECTORY=/app/output
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_TO_FILE=true
+      - LOG_FILE_PATH=/app/logs/app.log
+      
+      # Performance Configuration
+      - CACHE_SIZE_MB=${CACHE_SIZE_MB:-512}
+      - ENABLE_CACHING=${ENABLE_CACHING:-true}
+      - MAX_CONCURRENT_OPERATIONS=${MAX_CONCURRENT_OPERATIONS:-3}
+      - MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-4096}
+      
+      # Blender Configuration
+      - BLENDER_PATH=/opt/blender/blender
+      - BLENDER_USE_GPU=${BLENDER_USE_GPU:-false}
+      - BLENDER_TIMEOUT=${BLENDER_TIMEOUT:-300}
+      
+      # Security
+      - ENABLE_RATE_LIMITING=${ENABLE_RATE_LIMITING:-true}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-10}
+      
+      # Development/Production mode
+      - DEVELOPMENT_MODE=${DEVELOPMENT_MODE:-false}
+      - TEST_MODE=${TEST_MODE:-false}
+    volumes:
+      # Persistent data
+      - blender_output:/app/output
+      - blender_logs:/app/logs
+      - blender_cache:/app/cache
+      - blender_assets:/app/assets
+      
+      # Configuration (optional)
+      - ${CONFIG_PATH:-./config}:/app/config:ro
+      
+      # Development volumes (comment out for production)
+      # - .:/app:ro
+      # - ./assets:/app/assets
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8501', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2.0}"
+          memory: "${MEMORY_LIMIT:-4G}"
+        reservations:
+          cpus: "${CPU_RESERVATION:-0.5}"
+          memory: "${MEMORY_RESERVATION:-1G}"
+    networks:
+      - blender-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.blender-studio.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.services.blender-studio.loadbalancer.server.port=8501"
+
+  # Development service with additional tools
+  blender-ai-studio-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    image: blender-ai-studio:dev
+    container_name: blender-ai-studio-dev
+    ports:
+      - "${DEV_WEB_PORT:-8502}:8501"
+      - "${DEV_API_PORT:-8001}:8000"
+      - "${JUPYTER_PORT:-8888}:8888"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - DEVELOPMENT_MODE=true
+      - LOG_LEVEL=DEBUG
+      - ENABLE_PROFILING=true
+    volumes:
+      - .:/app
+      - blender_dev_output:/app/output
+      - blender_dev_logs:/app/logs
+      - blender_dev_cache:/app/cache
+    command: ["streamlit", "run", "web_interface/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.runOnSave=true"]
+    networks:
+      - blender-network
+    profiles:
+      - dev
+
+  # GPU-enabled service for high-performance rendering
+  blender-ai-studio-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gpu
+    image: blender-ai-studio:gpu
+    container_name: blender-ai-studio-gpu
+    ports:
+      - "${GPU_WEB_PORT:-8503}:8501"
+      - "${GPU_API_PORT:-8002}:8000"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - BLENDER_USE_GPU=true
+      - CYCLES_DEVICE=CUDA
+      - MEMORY_LIMIT_MB=8192
+      - MAX_CONCURRENT_OPERATIONS=5
+    volumes:
+      - blender_gpu_output:/app/output
+      - blender_gpu_logs:/app/logs
+      - blender_gpu_cache:/app/cache
+      - blender_assets:/app/assets
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - blender-network
+    profiles:
+      - gpu
+
+  # Redis for caching and distributed processing
+  redis:
+    image: redis:7-alpine
+    container_name: blender-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - blender_redis:/data
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MEMORY:-256mb} --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - blender-network
+    profiles:
+      - redis
+      - distributed
+
+  # PostgreSQL for scene history and metadata
+  postgres:
+    image: postgres:15-alpine
+    container_name: blender-postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-blender_studio}
+      - POSTGRES_USER=${POSTGRES_USER:-blender}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-blender_password}
+    volumes:
+      - blender_postgres:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-blender}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - blender-network
+    profiles:
+      - postgres
+      - database
+
+  # Traefik reverse proxy for production
+  traefik:
+    image: traefik:v3.0
+    container_name: blender-traefik
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    networks:
+      - blender-network
+    profiles:
+      - traefik
+      - production
+
+  # Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: blender-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - blender_prometheus:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - blender-network
+    profiles:
+      - monitoring
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: blender-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - blender_grafana:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - blender-network
+    profiles:
+      - monitoring
+
+# Named volumes for data persistence
+volumes:
+  blender_output:
+    driver: local
+  blender_logs:
+    driver: local
+  blender_cache:
+    driver: local
+  blender_assets:
+    driver: local
+  blender_dev_output:
+    driver: local
+  blender_dev_logs:
+    driver: local
+  blender_dev_cache:
+    driver: local
+  blender_gpu_output:
+    driver: local
+  blender_gpu_logs:
+    driver: local
+  blender_gpu_cache:
+    driver: local
+  blender_redis:
+    driver: local
+  blender_postgres:
+    driver: local
+  blender_prometheus:
+    driver: local
+  blender_grafana:
+    driver: local
+  traefik_letsencrypt:
+    driver: local
+
+# Networks
+networks:
+  blender-network:
+    driver: bridge

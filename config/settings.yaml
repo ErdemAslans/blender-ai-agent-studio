@@ -1,0 +1,126 @@
+# Blender AI Agent Studio Configuration - ADK Integration
+
+# Vertex AI Configuration
+vertex_ai:
+  project_id: "${GOOGLE_CLOUD_PROJECT}"
+  location: "us-central1"
+  model: "gemini-2.0-flash-exp"
+
+# ADK Agent Configuration
+agents:
+  scene_director:
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.8
+    max_retries: 3
+    timeout: 60
+    
+  environment_builder:
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.6
+    max_structures: 100
+    default_scale: 1.0
+    
+  lighting_designer:
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.7
+    max_lights: 50
+    default_energy: 1000
+    
+  asset_placement:
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.6
+    max_assets: 500
+    collision_detection: true
+    
+  effects_coordinator:
+    model: "gemini-2.0-flash-exp"
+    temperature: 0.7
+    max_particles: 10000
+    simulation_steps: 250
+
+# Scene Generation Settings
+scene_generation:
+  default_resolution: [1920, 1080]
+  default_samples: 128
+  max_scene_complexity: "high"
+  auto_optimize: true
+  
+# Template Library
+templates:
+  styles:
+    cyberpunk:
+      primary_colors: ["#00ffff", "#ff00ff", "#ffff00"]
+      lighting_intensity: 2.0
+      fog_density: 0.3
+      building_density: "high"
+      
+    medieval:
+      primary_colors: ["#8b4513", "#654321", "#d2691e"]
+      lighting_intensity: 0.8
+      fog_density: 0.1
+      building_density: "medium"
+      
+    post_apocalyptic:
+      primary_colors: ["#696969", "#8b7355", "#cd853f"]
+      lighting_intensity: 1.2
+      fog_density: 0.4
+      building_density: "sparse"
+      
+    scifi:
+      primary_colors: ["#00bfff", "#7fff00", "#ff1493"]
+      lighting_intensity: 1.5
+      fog_density: 0.2
+      building_density: "medium"
+
+# Asset Libraries
+asset_libraries:
+  - name: "default"
+    path: "./assets/default"
+    categories: ["buildings", "vehicles", "props", "nature"]
+    
+  - name: "cyberpunk"
+    path: "./assets/cyberpunk"
+    categories: ["neon_signs", "tech_props", "vehicles"]
+    
+  - name: "medieval"
+    path: "./assets/medieval"
+    categories: ["castles", "props", "nature"]
+
+# Quality Presets
+quality_presets:
+  draft:
+    samples: 32
+    resolution_scale: 0.5
+    simplify_subdivision: 2
+    
+  preview:
+    samples: 64
+    resolution_scale: 0.75
+    simplify_subdivision: 1
+    
+  high:
+    samples: 128
+    resolution_scale: 1.0
+    simplify_subdivision: 0
+    
+  ultra:
+    samples: 256
+    resolution_scale: 1.0
+    simplify_subdivision: 0
+
+# Performance Settings
+performance:
+  max_concurrent_operations: 5
+  memory_limit_mb: 8192
+  cache_size_mb: 1024
+  use_gpu: true
+  
+# Validation Rules
+validation:
+  max_polygon_count: 10000000
+  max_texture_size: 4096
+  required_checks:
+    - "scene_hierarchy"
+    - "material_validity"
+    - "lighting_setup"
+    - "render_settings"
